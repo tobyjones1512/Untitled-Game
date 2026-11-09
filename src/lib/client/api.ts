@@ -32,14 +32,16 @@ export const sendSignal = (code: string, c: Creds, to: string, data: unknown) =>
 export interface MatchConfig {
   enabled: boolean;
   verified: boolean;
-  verifyUrl: string | null;
   dev: boolean;
 }
 
 export async function getMatchConfig(): Promise<MatchConfig> {
   const res = await fetch("/api/match/config", { cache: "no-store" });
-  return res.ok ? ((await res.json()) as MatchConfig) : { enabled: false, verified: false, verifyUrl: null, dev: false };
+  return res.ok ? ((await res.json()) as MatchConfig) : { enabled: false, verified: false, dev: false };
 }
+
+/** Start the Stripe Identity (photo ID + selfie) check; resolves with the hosted-page URL. */
+export const startVerification = () => post<{ url: string }>("/api/age/start", {});
 
 export const devVerify = () => post<{ ok: true }>("/api/age/dev", {});
 

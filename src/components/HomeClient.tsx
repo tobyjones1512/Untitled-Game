@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MatchSearch } from "./MatchSearch";
 import { usePresence } from "@/hooks/usePresence";
 import { PlayerForm } from "./PlayerForm";
-import { createRoom, devVerify, getMatchConfig, joinQueue, joinRoom, type MatchConfig } from "@/lib/client/api";
+import { createRoom, devVerify, getMatchConfig, joinQueue, joinRoom, startVerification, type MatchConfig } from "@/lib/client/api";
 import { saveCreds } from "@/lib/client/session";
 
 export function HomeClient() {
@@ -20,6 +20,30 @@ export function HomeClient() {
       if (c.enabled && new URLSearchParams(window.location.search).get("match")) setMode("match");
     });
   }, []);
+  const [verifyMsg, setVerifyMsg] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("verify");
+    const msgs: Record<string, string> = {
+      ok: "",
+      pending: "Stripe is still checking your ID. Wait a minute, then tap 'Check again'.",
+      failed: "The check didn't pass or wasn't finished. You can try again.",
+      minor: "You must be 18 or older to play with strangers.",
+      expired: "That verification session expired. Please start again.",
+      error: "Something went wrong talking to the verification service. Please try again.",
+    };
+    if (v) setVerifyMsg(msgs[v] ?? "");
+  }, []);
+  const beginVerification = async () => {
+    setVerifying(true);
+    setVerifyMsg("");
+    try {
+      window.location.href = (await startVerification()).url;
+    } catch (e) {
+      setVerifyMsg(e instanceof Error ? e.message : "Could not start verification.");
+      setVerifying(false);
+    }
+  };
   const stopSearch = useCallback(() => setTicket(null), []);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -105,8 +129,13 @@ export function HomeClient() {
             <div className="space-y-4 text-center">
               <p className="font-display text-xl font-black">Verify you're an adult</p>
               <p className="text-sm text-white/65">
-                Playing with strangers is only for verified adults, because this game is played on camera. Verification is quick and we only keep a pass/fail result.
+                Playing with strangers is only for verified adults, because this game is played on camera. You'll check a photo ID and take a selfie on Stripe's secure page. We never see or store them, only a pass/fail result.
               </p>
+              {verifyMsg && (
+                <p role="alert" className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+                  {verifyMsg}
+                </p>
+              )}
               {match?.dev ? (
                 <button
                   className="btn-primary w-full"
@@ -118,9 +147,16 @@ export function HomeClient() {
                   Dev: pretend I'm verified
                 </button>
               ) : (
-                <a className="btn-primary w-full" href={match?.verifyUrl ?? "#"}>
-                  Verify my age
-                </a>
+                <>
+                  <button className="btn-primary w-full" disabled={verifying} onClick={beginVerification}>
+                    {verifying ? "Opening Stripe..." : "Verify my age (photo ID + selfie)"}
+                  </button>
+                  {new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("verify") === "pending" && (
+                    <a className="btn-ghost w-full" href="/api/age/callback">
+                      Check again
+                    </a>
+                  )}
+                </>
               )}
             </div>
           ) : (

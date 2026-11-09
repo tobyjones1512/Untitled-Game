@@ -1,18 +1,14 @@
 import { NextResponse } from "next/server";
-import { devProviderAllowed, isAdult, strangersEnabled, verifyUrl } from "@/lib/server/age";
+import { devProviderAllowed, isAdult, strangersEnabled } from "@/lib/server/age";
 
 export const dynamic = "force-dynamic";
 
-/** Tells the UI whether stranger matchmaking exists and whether this browser is verified. */
+/** Tells the UI whether stranger matchmaking exists and whether this browser has passed the age check. */
 export async function GET(req: Request) {
-  const verified = strangersEnabled() && isAdult(req);
-  // Only show the tab when there's a real way to verify, or this browser already has a pass.
-  // (In test-pass mode the public sees nothing; the tester's browser holds the cookie.)
-  const enabled = strangersEnabled() && (verifyUrl() !== null || devProviderAllowed() || verified);
+  const enabled = strangersEnabled();
   return NextResponse.json({
     enabled,
-    verified,
-    verifyUrl: verifyUrl(),
+    verified: enabled && isAdult(req),
     dev: enabled && devProviderAllowed(),
   });
 }

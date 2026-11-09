@@ -1,56 +1,42 @@
-// Age-verification gate for the "play with strangers" feature.
+// Age gate for "play with strangers".
 //
-// Self-declared checkboxes are NOT enough to match anonymous people into a game
-// played on camera. Stranger matchmaking therefore stays OFF unless a verified-adult
-// cookie can be issued, which needs a real provider you plug in:
+// Players verify with Stripe Identity (government photo ID + live selfie match), which
+// runs on Stripe's hosted page. Our server never sees the photos or the ID. After Stripe
+// redirects the player back, /api/age/callback fetches the session from Stripe with our
+// secret key, checks it is `verified` and that the verified date of birth is 18+, then
+// hands this browser a signed pass/fail cookie. Nothing else is stored.
 //
-//   STRANGERS_ENABLED=1
-//   AGE_COOKIE_SECRET=<long random string>      signs the "verified adult" cookie
-//   AGE_VERIFICATION_URL=<provider start URL>   where players are sent to verify
-//
-// After the provider confirms an adult, its callback must call mintAdultCookie()
-// (see src/app/api/age/callback/route.ts, currently a 501 stub).
-//
-// For local development only, AGE_VERIFICATION_PROVIDER=dev issues the cookie on
-// request. It is refused on Vercel production (VERCEL_ENV=production).
+// Turn it on by setting ONE environment variable: STRIPE_SECRET_KEY (sk_test_... to try
+// it with Stripe's test mode, sk_live_... for real checks). Unset it and matchmaking
+// disappears. Optional: AGE_COOKIE_SECRET (otherwise derived from the Stripe key),
+// STRANGERS_DISABLED=1 (kill switch).
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const ADULT_COOKIE = "adult_v";
 const MAX_AGE_S = 30 * 24 * 60 * 60;
 
+export function stripeKey(): string {
+  return process.env.STRIPE_SECRET_KEY ?? "";
+}
+
+export function stripeConfigured(): boolean {
+  return /^(sk|rk)_(test|live)_/.test(stripeKey());
+}
+
+/** Local development only: skips Stripe. Refused on Vercel production. */
 export function devProviderAllowed(): boolean {
   return process.env.AGE_VERIFICATION_PROVIDER === "dev" && process.env.VERCEL_ENV !== "production";
 }
 
-function secret(): string {
-  return process.env.AGE_COOKIE_SECRET || (devProviderAllowed() ? "dev-only-secret" : "");
-}
-
 export function strangersEnabled(): boolean {
-  if (process.env.STRANGERS_ENABLED !== "1") return false;
-  return devProviderAllowed() || (!!process.env.AGE_COOKIE_SECRET && (!!process.env.AGE_VERIFICATION_URL || testKeyConfigured()));
+  if (process.env.STRANGERS_DISABLED === "1") return false;
+  return stripeConfigured() || devProviderAllowed();
 }
 
-/**
- * TEST PASS: while you're testing, set AGE_TEST_KEY to a long random string. Visiting
- * /api/age/test?key=<it> issues the verified cookie to THAT browser only, so you (and
- * testers you trust) can try matchmaking without a provider, while the public still
- * can't reach it. Remove AGE_TEST_KEY when testing is done.
- */
-export function testKeyConfigured(): boolean {
-  return (process.env.AGE_TEST_KEY ?? "").length >= 16;
-}
-
-export function testKeyMatches(candidate: string): boolean {
-  const key = process.env.AGE_TEST_KEY ?? "";
-  if (key.length < 16) return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(key);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-export function verifyUrl(): string | null {
-  return process.env.AGE_VERIFICATION_URL ?? null;
+function secret(): string {
+  if (process.env.AGE_COOKIE_SECRET) return process.env.AGE_COOKIE_SECRET;
+  if (stripeConfigured()) return createHmac("sha256", stripeKey()).update("last-thread-adult-cookie-v1").digest("hex");
+  return devProviderAllowed() ? "dev-only-secret" : "";
 }
 
 function sign(exp: number): string {
@@ -74,6 +60,12 @@ export function isAdult(req: Request): boolean {
   const want = Buffer.from(sign(exp));
   const got = Buffer.from(sig);
   return want.length === got.length && timingSafeEqual(want, got);
+}
+
+export function readCookie(req: Request, name: string): string {
+  const raw = req.headers.get("cookie") ?? "";
+  const m = raw.split(/;\s*/).find((c) => c.startsWith(`${name}=`));
+  return m ? decodeURIComponent(m.slice(name.length + 1)) : "";
 }
 
 export function clientIp(req: Request): string {

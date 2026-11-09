@@ -77,27 +77,37 @@ second browser.
 3. Optional: set `NEXT_PUBLIC_TURN_URL`, `NEXT_PUBLIC_TURN_USERNAME`, `NEXT_PUBLIC_TURN_CREDENTIAL` for a TURN relay.
    STUN-only (the default) works on most home networks but fails behind strict/symmetric NATs.
 
-## Playing with strangers (off by default)
+## Playing with strangers (Stripe Identity age check)
 
-A "Quick match" tab puts verified adults into a public queue; a room forms as soon as 2-4 are waiting. Because the
-game is played on camera, **this stays disabled until a real age-verification provider is plugged in**. A checkbox is
-not verification.
+A "Quick match" tab puts **verified adults** into a public queue; a room forms as soon as 2-4 are waiting. Every
+player must pass a **government photo ID + live selfie match** on Stripe's hosted page first. We never see or store
+the photos or the ID.
 
-It is only enabled when all of these are set (otherwise the tab is hidden and every endpoint returns 404/403):
+**Turn it on with one environment variable:** `STRIPE_SECRET_KEY` in the Vercel project.
+- `sk_test_...` : Stripe test mode. Walk through the flow with Stripe's test documents, no real checks or charges.
+- `sk_live_...` : real checks (about $1.50 each, billed by Stripe).
+- Unset it and the tab disappears and every matchmaking endpoint returns 404/403. `STRANGERS_DISABLED=1` is a kill
+  switch. (Optional: `AGE_COOKIE_SECRET`; otherwise the pass-cookie secret is derived from the Stripe key.)
 
-| Variable | Purpose |
-|---|---|
-| `STRANGERS_ENABLED=1` | master switch |
-| `AGE_COOKIE_SECRET` | long random string that signs the pass/fail "verified adult" cookie |
-| `AGE_VERIFICATION_URL` | where players are sent to verify (your provider's start URL) |
+How it works:
+1. `POST /api/age/start` creates a Stripe Identity session (`type=document`, matching selfie + live capture required)
+   and tags it with a random nonce stored in an httpOnly cookie. The player is sent to Stripe.
+2. Stripe returns them to `/api/age/callback`. We never trust the redirect: the session is re-read from Stripe with
+   our secret key. It must be the session this browser started (nonce match), be `verified`, and carry a date of
+   birth that makes them 18+ (live keys refuse a session with no DOB). Each verified session can be redeemed only
+   once, so one check can't be shared.
+3. On success the browser gets a signed pass/fail cookie (30 days). That's all that is stored.
 
-Then implement `src/app/api/age/callback/route.ts` (currently a `501` stub with instructions): verify the provider's
-result server-side and call `mintAdultCookie()`. Store only the signed pass/fail cookie, never IDs or birth dates.
-Joining a matchmade room (even with its code) also requires that cookie. Matchmaking is rate limited per IP, and rooms
-formed this way show a **Report** button (reports are stored in the `reports` Redis list for review).
+Joining a matchmade room, even with its code, requires that cookie. Verification starts and matchmaking are rate
+limited per IP, and matched rooms show a **Report** button (reports go to the `reports` Redis list for review; you
+should check it before opening this up widely).
 
-For local testing only: `STRANGERS_ENABLED=1 AGE_VERIFICATION_PROVIDER=dev npm run dev` shows a "pretend I'm
-verified" button. The dev provider is refused when `VERCEL_ENV=production`.
+Tests: `scripts/mock-stripe.mjs` is a local stand-in for Stripe's API and `scripts/test-age.mjs` drives the whole flow
+(adult, minor, unfinished, replay, wrong browser, forged cookies, live-key-without-DOB). It has not been run against
+real Stripe, so do a test-mode pass with `sk_test_...` before using a live key.
+
+For local development without Stripe: `AGE_VERIFICATION_PROVIDER=dev npm run dev` shows a "pretend I'm verified"
+button. It is refused when `VERCEL_ENV=production`.
 
 ## Known limits
 
