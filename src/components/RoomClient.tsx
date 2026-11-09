@@ -12,6 +12,7 @@ import { MiniGame } from "./MiniGame";
 import { GameOver } from "./GameOver";
 import { Modal } from "./Modal";
 import { useRoom } from "@/hooks/useRoom";
+import { usePresence } from "@/hooks/usePresence";
 import { useEngine } from "@/hooks/useEngine";
 import { joinRoom, reportPlayer, sendAction, sendSignal } from "@/lib/client/api";
 import { clearCreds, loadCreds, saveCreds, type Creds } from "@/lib/client/session";
@@ -72,6 +73,7 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
   const { room, connection, deniedReason, applyRoom, refresh, subscribeSignals, serverNow } = useRoom(code, creds);
   const pokeRef = useRef<(() => void) | null>(null);
   const engine = useEngine();
+  usePresence();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmQuit, setConfirmQuit] = useState(false);

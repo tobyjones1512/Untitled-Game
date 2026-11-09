@@ -66,6 +66,22 @@ function memExec(cmd: Cmd): unknown {
       if (e.value.length === 0) mem.delete(key);
       return out;
     }
+    case "PFADD": {
+      const e = memGet(key);
+      const set = e && Array.isArray(e.value) ? e.value : [];
+      const before = set.length;
+      for (const m of cmd.slice(2)) if (!set.includes(String(m))) set.push(String(m));
+      mem.set(key, { value: set, expiresAt: e?.expiresAt ?? null });
+      return set.length > before ? 1 : 0;
+    }
+    case "PFCOUNT": {
+      const all = new Set<string>();
+      for (const k of cmd.slice(1)) {
+        const e = memGet(String(k));
+        if (e && Array.isArray(e.value)) e.value.forEach((m) => all.add(m));
+      }
+      return all.size;
+    }
     case "INCR": {
       const e = memGet(key);
       const n = (e && typeof e.value === "string" ? Number(e.value) : 0) + 1;

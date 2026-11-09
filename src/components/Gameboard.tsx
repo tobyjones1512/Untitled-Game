@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MINIGAMES, Phase, type Engine, type GameView } from "@/lib/wasm/engine";
+import { MINIGAMES, Phase, describeResult, type Engine, type GameView } from "@/lib/wasm/engine";
 import type { ActionBody, PublicRoom } from "@/lib/types";
 import { PLAYER_COLORS, SPACE_STYLE, boardCell } from "@/lib/ui";
 import { Dice } from "./Dice";
@@ -100,7 +100,10 @@ export function Gameboard({ engine, room, view, meIndex, busy, act, minigamePend
               </span>
             </div>
             <InventoryBadges engine={engine} player={p} />
-            <span className="text-[11px] text-white/50">{p.alive ? `${p.total}/7 items` : "Eliminated"}</span>
+            <span className="text-[11px] text-white/50">
+              {p.alive ? `${p.total}/7 items` : "Eliminated"}
+              {view.phase !== Phase.ORDER && ` · goes ${["1st", "2nd", "3rd", "4th"][p.seat]}`}
+            </span>
           </div>
         ))}
       </div>
@@ -143,6 +146,10 @@ function TurnPanel({
   let headline = "";
   let sub = "";
   switch (view.phase) {
+    case Phase.ORDER:
+      headline = "Roll for turn order!";
+      sub = "Highest number goes first. No ties.";
+      break;
     case Phase.ROLL:
       headline = myTurn ? "Your turn!" : `${name(view.cur)}'s turn`;
       sub = myTurn ? "" : "Waiting for them to roll...";
@@ -168,6 +175,24 @@ function TurnPanel({
     <>
       <p className="font-display text-base font-black leading-tight sm:text-xl">{headline}</p>
       {sub && <p className="text-[11px] text-white/60 sm:text-sm">{sub}</p>}
+      {view.phase === Phase.ORDER && (
+        <>
+          {me.alive && me.orderRoll === 0 ? (
+            <button className="btn-primary px-6 py-3 text-base" disabled={busy} onClick={() => act({ type: "orderRoll" })}>
+              🎲 Roll
+            </button>
+          ) : (
+            <p className="text-[11px] text-white/60 sm:text-sm">You rolled a {me.orderRoll}. Waiting for others...</p>
+          )}
+          <ul className="flex flex-wrap justify-center gap-1 text-[11px] sm:text-xs">
+            {view.players.map((p) => (
+              <li key={p.index} className="rounded bg-white/5 px-2 py-0.5">
+                {name(p.index)}: <b>{p.orderRoll || "..."}</b>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {view.phase === Phase.ROLL && myTurn && me.alive && (
         <button className="btn-primary px-6 py-3 text-base" disabled={busy} onClick={() => act({ type: "roll" })}>
           🎲 Roll
@@ -183,7 +208,7 @@ function TurnPanel({
                 <span className="truncate">
                   {p.mgRank}. {name(p.index)}
                 </span>
-                <span className="text-white/55">{view.mgType === 0 ? `${p.mgScore / 1000} taps` : p.mgScore > 0 ? `${(p.mgScore / 1000).toFixed(1)}pts` : "DNF"}</span>
+                <span className="text-white/55">{describeResult(view.mgType, p.mgRaw, p.mgScore)}</span>
               </li>
             ))}
         </ol>

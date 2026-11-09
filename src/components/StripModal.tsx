@@ -70,7 +70,7 @@ export function StripModal({ engine, view, room, meIndex, busy, act, serverNow }
   return (
     <Modal title={isTarget ? "Your friends are voting" : `Vote: what does ${targetName} take off?`} tone="alert">
       <p className="text-white/75">
-        {reason} {isTarget ? "They'll pick what comes off next." : "Only items that can come off next are shown (shoes before socks, underwear last)."}
+        {reason} {isTarget ? "They'll pick what comes off next." : "Only items that can come off next are shown (shoes before pants and socks, underwear last)."}
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-2">

@@ -28,7 +28,25 @@ function secret(): string {
 
 export function strangersEnabled(): boolean {
   if (process.env.STRANGERS_ENABLED !== "1") return false;
-  return devProviderAllowed() || (!!process.env.AGE_COOKIE_SECRET && !!process.env.AGE_VERIFICATION_URL);
+  return devProviderAllowed() || (!!process.env.AGE_COOKIE_SECRET && (!!process.env.AGE_VERIFICATION_URL || testKeyConfigured()));
+}
+
+/**
+ * TEST PASS: while you're testing, set AGE_TEST_KEY to a long random string. Visiting
+ * /api/age/test?key=<it> issues the verified cookie to THAT browser only, so you (and
+ * testers you trust) can try matchmaking without a provider, while the public still
+ * can't reach it. Remove AGE_TEST_KEY when testing is done.
+ */
+export function testKeyConfigured(): boolean {
+  return (process.env.AGE_TEST_KEY ?? "").length >= 16;
+}
+
+export function testKeyMatches(candidate: string): boolean {
+  const key = process.env.AGE_TEST_KEY ?? "";
+  if (key.length < 16) return false;
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(key);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export function verifyUrl(): string | null {

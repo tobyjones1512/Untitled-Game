@@ -5,10 +5,13 @@ export const dynamic = "force-dynamic";
 
 /** Tells the UI whether stranger matchmaking exists and whether this browser is verified. */
 export async function GET(req: Request) {
-  const enabled = strangersEnabled();
+  const verified = strangersEnabled() && isAdult(req);
+  // Only show the tab when there's a real way to verify, or this browser already has a pass.
+  // (In test-pass mode the public sees nothing; the tester's browser holds the cookie.)
+  const enabled = strangersEnabled() && (verifyUrl() !== null || devProviderAllowed() || verified);
   return NextResponse.json({
     enabled,
-    verified: enabled && isAdult(req),
+    verified,
     verifyUrl: verifyUrl(),
     dev: enabled && devProviderAllowed(),
   });

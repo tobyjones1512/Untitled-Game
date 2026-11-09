@@ -29,7 +29,7 @@ export function TailorShopModal({ engine, view, room, meIndex, busy, act }: Prop
 
       <section className="mt-5">
         <h3 className="label">Put an item back on · {engine.costRestore} coins</h3>
-        <p className="mb-2 text-xs text-white/45">Dress in order: underwear, bra, socks, shoes, pants, shirt.</p>
+        <p className="mb-2 text-xs text-white/45">Dress inside out: underwear, bra, socks and pants, then shoes, then shirt.</p>
         {missing.length === 0 ? (
           <p className="rounded-xl bg-white/5 p-3 text-sm text-white/55">You haven't lost anything yet. Nice.</p>
         ) : (

@@ -8,6 +8,8 @@ export const Phase = {
   MINI: 3,
   STRIP: 4,
   OVER: 5,
+  /** everyone rolls once to decide turn order */
+  ORDER: 6,
 } as const;
 
 export const ITEMS = [
@@ -22,13 +24,27 @@ export const ITEMS = [
 export const MINIGAMES = [
   { id: 0, name: "Tap Frenzy", blurb: "Mash the button as many times as you can in 5 seconds." },
   { id: 1, name: "Stop the Clock", blurb: "The timer hides after 2 seconds. Stop it as close to the target as you can." },
+  { id: 2, name: "Quick Draw", blurb: "Wait for the screen to turn green, then tap as fast as you can. Tap early and you're out." },
+  { id: 3, name: "Simon Says", blurb: "Watch the pattern, then repeat it. It gets one step longer each round." },
+  { id: 4, name: "Quick Maths", blurb: "Answer as many sums as you can in 15 seconds." },
+  { id: 5, name: "Whack-a-Target", blurb: "Hit 10 targets as fast as you can. Each one jumps to a new spot." },
 ] as const;
+
+/** Human-readable result for the results table. */
+export function describeResult(type: number, raw: number, score: number): string {
+  if (type === 0) return `${raw} taps`;
+  if (type === 1) return score > 0 ? `${(raw / 1000).toFixed(2)}s` : "DNF";
+  if (type === 2) return score > 0 ? `${raw}ms` : "false start";
+  if (type === 3) return `${raw} step${raw === 1 ? "" : "s"}`;
+  if (type === 4) return `${raw} correct`;
+  return score > 0 ? `${(raw / 1000).toFixed(1)}s` : "DNF";
+}
 
 export type Gender = "man" | "woman";
 
 // state layout, mirrored from assembly/index.ts
 const HEADER = 16;
-const STRIDE = 16;
+const STRIDE = 20;
 
 export interface PlayerView {
   index: number;
@@ -44,6 +60,10 @@ export interface PlayerView {
   mgRank: number;
   /** item voted for + 1 (0 = not voted) */
   vote: number;
+  /** turn-order roll (0 = hasn't rolled) */
+  orderRoll: number;
+  /** turn position, 0 = goes first */
+  seat: number;
 }
 
 export interface GameView {
@@ -84,6 +104,8 @@ export function decodeState(s: number[]): GameView {
       mgDone: s[b + 13] === 1,
       mgRank: s[b + 14],
       vote: s[b + 15],
+      orderRoll: s[b + 16],
+      seat: s[b + 17],
     });
   }
   return {
@@ -120,7 +142,11 @@ interface WasmExports {
   mgTarget(seed: number): number;
   mgScore(type: number, raw: number, seed: number): number;
   initGame(n: number, seed: number, femaleMask: number): number;
-  actRoll(p: number): number;
+  actRoll(p: number, roll: number, entropy: number): number;
+  actOrderRoll(p: number, roll: number): number;
+  mgRand(seed: number, i: number, mod: number): number;
+  mgCell(seed: number, i: number): number;
+  mgReactionDelay(seed: number): number;
   actShopBuy(p: number, item: number): number;
   actShopForce(p: number, target: number): number;
   actShopLeave(p: number): number;
@@ -193,8 +219,20 @@ export class Engine {
     const mask = genders.reduce((m, g, i) => (g === "woman" ? m | (1 << i) : m), 0);
     return this.run(new Array(this.ex.stateSize()).fill(0), (ex) => ex.initGame(genders.length, seed | 0, mask));
   }
-  roll(s: number[], p: number) {
-    return this.run(s, (ex) => ex.actRoll(p));
+  roll(s: number[], p: number, face: number, entropy: number) {
+    return this.run(s, (ex) => ex.actRoll(p, face, entropy));
+  }
+  orderRoll(s: number[], p: number, face: number) {
+    return this.run(s, (ex) => ex.actOrderRoll(p, face));
+  }
+  mgRand(seed: number, i: number, mod: number) {
+    return this.ex.mgRand(seed, i, mod);
+  }
+  mgCell(seed: number, i: number) {
+    return this.ex.mgCell(seed, i);
+  }
+  mgReactionDelay(seed: number) {
+    return this.ex.mgReactionDelay(seed);
   }
   buy(s: number[], p: number, item: number) {
     return this.run(s, (ex) => ex.actShopBuy(p, item));

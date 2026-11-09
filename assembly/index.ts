@@ -7,8 +7,8 @@
 // ---------------------------------------------------------------- layout ---
 const MAX_PLAYERS: i32 = 4;
 const HEADER: i32 = 16;
-const STRIDE: i32 = 16;
-const SIZE: i32 = HEADER + MAX_PLAYERS * STRIDE; // 80
+const STRIDE: i32 = 20;
+const SIZE: i32 = HEADER + MAX_PLAYERS * STRIDE; // 96
 
 // header fields
 const H_PHASE: i32 = 0;
@@ -40,6 +40,8 @@ const F_MGSCORE: i32 = 12;
 const F_MGDONE: i32 = 13;
 const F_MGRANK: i32 = 14;
 const F_VOTE: i32 = 15; // item voted for + 1 (0 = no vote yet)
+const F_ORDER: i32 = 16; // turn-order roll (0 = hasn't rolled)
+const F_SEAT: i32 = 17; // turn order position, 0 = goes first
 
 // phases
 const LOBBY: i32 = 0;
@@ -48,6 +50,9 @@ const SHOP: i32 = 2;
 const MINI: i32 = 3;
 const STRIP: i32 = 4;
 const OVER: i32 = 5;
+const ORDER: i32 = 6; // everyone rolls once to decide who goes first
+
+const MG_TYPES: i32 = 6;
 
 // economy
 const BOARD: i32 = 24;
@@ -97,10 +102,18 @@ function aliveCount(): i32 {
   return c;
 }
 
+function playerAtSeat(k: i32): i32 {
+  const n = g(H_N);
+  for (let i = 0; i < n; i++) if (g(P(i, F_SEAT)) == k) return i;
+  return k;
+}
+
+// next living player in TURN ORDER (seat order), not index order
 function nextAlive(from: i32): i32 {
   const n = g(H_N);
+  const seat = g(P(from, F_SEAT));
   for (let k = 1; k <= n; k++) {
-    const j = (from + k) % n;
+    const j = playerAtSeat((seat + k) % n);
     if (g(P(j, F_ALIVE)) == 1) return j;
   }
   return from;
@@ -152,28 +165,67 @@ export function redCoins(): i32 {
 }
 
 // ------------------------------------------------------------ minigames ---
+/** Deterministic value in [0, mod) derived from the round seed. Every client sees the same one. */
+export function mgRand(seed: i32, i: i32, mod: i32): i32 {
+  let h: u32 = <u32>seed ^ (<u32>(i + 1) * 0x9e3779b1);
+  h ^= h >> 15;
+  h *= 0x85ebca6b;
+  h ^= h >> 13;
+  h *= 0xc2b2ae35;
+  h ^= h >> 16;
+  return <i32>(h % <u32>mod);
+}
+
+/** Grid cell (0-8) of the i-th target in Whack-a-Target; never the same cell twice in a row. */
+export function mgCell(seed: i32, i: i32): i32 {
+  let cell = mgRand(seed, 300, 9);
+  for (let k = 1; k <= i; k++) cell = (cell + 1 + mgRand(seed, 300 + k, 8)) % 9;
+  return cell;
+}
+
+/** Wait (ms) after GO before the Reaction minigame lights up. */
+export function mgReactionDelay(seed: i32): i32 {
+  return 1500 + mgRand(seed, 77, 2500);
+}
+
 /** Hidden target (ms) for the timing minigame. */
 export function mgTarget(seed: i32): i32 {
   return 3000 + (seed & 0x7fffffff) % 4000;
 }
 
 /**
- * Normalised score, higher is better.
- * type 0 = 5 second button mash (raw = taps, capped at a humanly plausible 60)
- * type 1 = stop-the-clock (raw = ms when stopped, closest to mgTarget wins)
+ * Normalised score, higher is better. Raw is whatever the client measured:
+ * 0 Tap Frenzy      taps in 5s (capped at a humanly plausible 60)
+ * 1 Stop the Clock  ms when stopped; closest to mgTarget wins
+ * 2 Reaction        ms from the light turning on (under 70ms is not human = 0; false start = -1)
+ * 3 Memory          rounds of the pattern repeated correctly (cap 12)
+ * 4 Quick Maths     correct answers in 15s (cap 30)
+ * 5 Whack-a-Target  total ms to hit 10 targets (under 1.5s is not human = 0)
  */
 export function mgScore(type: i32, raw: i32, seed: i32): i32 {
   if (raw < 0) return 0;
   if (type == 0) return min<i32>(raw, 60) * 1000;
-  if (raw > 20000) return 0;
-  const d = abs<i32>(raw - mgTarget(seed));
-  return max<i32>(0, 10000 - d);
+  if (type == 1) {
+    if (raw > 20000) return 0;
+    return max<i32>(0, 10000 - abs<i32>(raw - mgTarget(seed)));
+  }
+  if (type == 2) {
+    if (raw < 70 || raw > 3000) return 0;
+    return 3000 - raw;
+  }
+  if (type == 3) return min<i32>(raw, 12) * 1000;
+  if (type == 4) return min<i32>(raw, 30) * 1000;
+  if (type == 5) {
+    if (raw < 1500 || raw > 20000) return 0;
+    return 20000 - raw;
+  }
+  return 0;
 }
 
 // -------------------------------------------------------- clothing order ---
 // A wardrobe is valid when clothes come off (and go back on) in a physically
 // sensible order:
-//   socks only come off once ALL shoes are off
+//   socks and pants only come off once ALL shoes are off
 //   bra only comes off once shirt, pants, shoes and socks are all off
 //   underwear only comes off once everything else is already off
 function isValid(p: i32): bool {
@@ -185,6 +237,7 @@ function isValid(p: i32): bool {
   const socks = g(P(p, F_ITEMS + 4));
   const bra = g(P(p, F_ITEMS + 5));
   if (socks < startCount(4, gender) && shoes > 0) return false;
+  if (pants < startCount(1, gender) && shoes > 0) return false; // can't get pants off over shoes
   if (bra < startCount(5, gender) && (shirt > 0 || pants > 0 || shoes > 0 || socks > 0)) return false;
   if (under < startCount(2, gender) && (shirt > 0 || pants > 0 || shoes > 0 || socks > 0 || bra > 0)) return false;
   return true;
@@ -295,8 +348,12 @@ function checkOver(): bool {
 function startMinigame(first: i32): void {
   s(H_CUR, first);
   s(H_PHASE, MINI);
+  const prev = g(H_MGTYPE);
+  const firstRound = g(H_ROUND) == 0;
   s(H_ROUND, g(H_ROUND) + 1);
-  s(H_MGTYPE, <i32>(nextRand() % 2));
+  let t = <i32>(nextRand() % <u32>MG_TYPES);
+  if (!firstRound && t == prev) t = (t + 1) % MG_TYPES;
+  s(H_MGTYPE, t);
   s(H_MGSEED, <i32>(nextRand() & 0x7fffffff));
   s(H_MGWINNER, -1);
   const n = g(H_N);
@@ -314,7 +371,7 @@ function endTurn(): void {
   if (checkOver()) return;
   const cur = g(H_CUR);
   const nxt = nextAlive(cur);
-  if (nxt <= cur) {
+  if (g(P(nxt, F_SEAT)) <= g(P(cur, F_SEAT))) {
     startMinigame(nxt);
   } else {
     s(H_CUR, nxt);
@@ -394,7 +451,7 @@ export function initGame(n: i32, seed: i32, femaleMask: i32): i32 {
   s(H_MGWINNER, -1);
   s(H_TARGET, -1);
   s(H_VOTEITEM, -1);
-  s(H_PHASE, ROLL);
+  s(H_PHASE, ORDER);
   s(H_CUR, 0);
   for (let i = 0; i < n; i++) {
     const gender = (femaleMask >> i) & 1;
@@ -412,10 +469,62 @@ export function initGame(n: i32, seed: i32, femaleMask: i32): i32 {
   return 0;
 }
 
-export function actRoll(p: i32): i32 {
+function allOrdered(): bool {
+  const n = g(H_N);
+  for (let i = 0; i < n; i++) if (g(P(i, F_ALIVE)) == 1 && g(P(i, F_ORDER)) == 0) return false;
+  return true;
+}
+
+// Highest roll goes first. Rolls are unique among players, but ties on 0 (dead /
+// never rolled) are broken by index so seats are always a valid permutation.
+function finalizeOrder(): void {
+  const n = g(H_N);
+  for (let i = 0; i < n; i++) {
+    let seat = 0;
+    for (let q = 0; q < n; q++) {
+      if (q == i) continue;
+      const oq = g(P(q, F_ORDER));
+      const oi = g(P(i, F_ORDER));
+      if (oq > oi || (oq == oi && q < i)) seat++;
+    }
+    s(P(i, F_SEAT), seat);
+  }
+  for (let k = 0; k < n; k++) {
+    const j = playerAtSeat(k);
+    if (g(P(j, F_ALIVE)) == 1) {
+      s(H_CUR, j);
+      break;
+    }
+  }
+  s(H_PHASE, ROLL);
+}
+
+/**
+ * Turn-order roll-off. `roll` (1-6) is supplied by the host from a CSPRNG and must
+ * differ from every other player's roll, so nobody ties. Highest goes first.
+ */
+export function actOrderRoll(p: i32, roll: i32): i32 {
+  if (g(H_PHASE) != ORDER) return -1;
+  if (!isPlayer(p) || g(P(p, F_ALIVE)) != 1 || g(P(p, F_ORDER)) != 0) return -2;
+  if (roll < 1 || roll > 6) return -3;
+  const n = g(H_N);
+  for (let i = 0; i < n; i++) if (i != p && g(P(i, F_ALIVE)) == 1 && g(P(i, F_ORDER)) == roll) return -3;
+  s(P(p, F_ORDER), roll);
+  s(H_ROLL, roll);
+  if (allOrdered()) finalizeOrder();
+  return roll;
+}
+
+/**
+ * Move. `roll` (1-6) comes from the host's CSPRNG (truly random, not derived from
+ * the seeded generator) and `entropy` is mixed into the internal RNG so everything
+ * else (minigame picks, tie-breaks) is unpredictable too.
+ */
+export function actRoll(p: i32, roll: i32, entropy: i32): i32 {
   if (g(H_PHASE) != ROLL) return -1;
   if (p != g(H_CUR)) return -2;
-  const roll = 1 + <i32>(nextRand() % 6);
+  if (roll < 1 || roll > 6) return -3;
+  s(H_RNG, g(H_RNG) ^ entropy);
   s(H_ROLL, roll);
   const pos = (g(P(p, F_POS)) + roll) % BOARD;
   s(P(p, F_POS), pos);
@@ -516,8 +625,11 @@ export function actForfeit(p: i32): i32 {
   for (let k = 0; k < ITEM_KINDS; k++) s(P(p, F_ITEMS + k), 0);
   s(P(p, F_TOTAL), 0);
   s(P(p, F_ALIVE), 0);
+  s(P(p, F_ORDER), 0);
   if (checkOver()) return 0;
-  if (ph == ROLL || ph == SHOP) {
+  if (ph == ORDER) {
+    if (allOrdered()) finalizeOrder();
+  } else if (ph == ROLL || ph == SHOP) {
     if (p == g(H_CUR)) endTurn();
   } else if (ph == MINI) {
     s(P(p, F_MGDONE), 1);

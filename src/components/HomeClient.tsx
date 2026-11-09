@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { MatchSearch } from "./MatchSearch";
+import { usePresence } from "@/hooks/usePresence";
 import { PlayerForm } from "./PlayerForm";
 import { createRoom, devVerify, getMatchConfig, joinQueue, joinRoom, type MatchConfig } from "@/lib/client/api";
 import { saveCreds } from "@/lib/client/session";
@@ -10,10 +11,14 @@ import { saveCreds } from "@/lib/client/session";
 export function HomeClient() {
   const router = useRouter();
   const [mode, setMode] = useState<"create" | "join" | "match">("create");
+  const online = usePresence();
   const [match, setMatch] = useState<MatchConfig | null>(null);
   const [ticket, setTicket] = useState<string | null>(null);
   useEffect(() => {
-    getMatchConfig().then(setMatch);
+    getMatchConfig().then((c) => {
+      setMatch(c);
+      if (c.enabled && new URLSearchParams(window.location.search).get("match")) setMode("match");
+    });
   }, []);
   const stopSearch = useCallback(() => setTicket(null), []);
   const [code, setCode] = useState("");
@@ -23,9 +28,20 @@ export function HomeClient() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 px-4 py-10 lg:flex-row lg:items-center lg:gap-14">
       <section className="flex-1">
-        <p className="mb-3 inline-block rounded-full border border-glow-pink/40 bg-glow-pink/10 px-3 py-1 text-xs font-bold uppercase tracking-widest text-glow-pink">
-          18+ · 2-4 players · live webcam
-        </p>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <p className="inline-block rounded-full border border-glow-pink/40 bg-glow-pink/10 px-3 py-1 text-xs font-bold uppercase tracking-widest text-glow-pink">
+            18+ · 2-4 players · live webcam
+          </p>
+          {online !== null && (
+            <p
+              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-200"
+              aria-live="polite"
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-300" aria-hidden="true" />
+              {online} online
+            </p>
+          )}
+        </div>
         <h1 className="font-display text-5xl font-black leading-[1.02] tracking-tight sm:text-6xl">
           Last Thread
           <br />
@@ -36,8 +52,8 @@ export function HomeClient() {
         </p>
         <ol className="mt-7 grid max-w-md gap-3 text-sm text-white/75">
           {[
-            ["🎲", "Roll and move around the board. Blue wins coins, red takes them, the tailor sells second chances."],
-            ["⚡", "After every lap, everyone plays a 10 second minigame at once."],
+            ["🎲", "Roll to see who goes first, then move around the board. Blue wins coins, red takes them, the tailor sells second chances."],
+            ["⚡", "After every lap, everyone plays a quick minigame at once: reflexes, memory, maths and more."],
             ["👕", "Come last and take one item off on camera. Zero items left and you're out."],
           ].map(([icon, text]) => (
             <li key={text} className="flex gap-3">

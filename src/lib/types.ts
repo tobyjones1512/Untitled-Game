@@ -38,6 +38,7 @@ export interface PublicRoom {
 export type ActionBody =
   | { type: "start" }
   | { type: "leaveLobby" }
+  | { type: "orderRoll" }
   | { type: "roll" }
   | { type: "buy"; item: number }
   | { type: "force"; target: number }

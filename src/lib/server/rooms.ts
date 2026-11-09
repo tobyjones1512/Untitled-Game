@@ -1,13 +1,14 @@
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { exec, run, type Cmd } from "./store";
 import { Phase, MINIGAMES, ITEMS, decodeState, getEngine, ERRORS, type Gender } from "../wasm/engine";
+import { rollDie, pickUnique, entropy } from "./dice";
 import type { ActionBody, LogEntry, LogKind, PublicRoom } from "../types";
 
 const ROOM_TTL_S = 6 * 60 * 60;
 const MAX_PLAYERS = 4;
 const MAX_LOG = 40;
 const MG_COUNTDOWN_MS = 3000;
-const MG_DEADLINE_MS = 22_000;
+const MG_DEADLINE_MS = 28_000;
 // breathing room between the last move of a lap and the minigame popping up
 const MG_PAUSE_MS = 4000;
 const VOTE_MS = 30_000;
@@ -269,7 +270,7 @@ export async function applyAction(codeRaw: string, playerId: string, token: stri
       if (init.code < 0) throw new RoomError(ERRORS[init.code] ?? "Could not start.");
       doc.state = init.state;
       doc.status = "playing";
-      pushLog(doc, "info", `The game begins! ${doc.players[0].name} goes first. Everyone starts with 7 items.`);
+      pushLog(doc, "info", "The game begins! Everyone starts with 7 items. Roll the dice: highest number goes first.");
       await saveRoom(doc);
       return toPublic(doc);
     }
@@ -294,8 +295,15 @@ export async function applyAction(codeRaw: string, playerId: string, token: stri
     let res;
 
     switch (body.type) {
+      case "orderRoll": {
+        // a fair pick among faces nobody has rolled yet, so the roll-off can't tie
+        const taken = before.players.filter((p) => p.alive && p.orderRoll > 0).map((p) => p.orderRoll);
+        res = engine.orderRoll(doc.state, me, pickUnique(taken));
+        break;
+      }
       case "roll":
-        res = engine.roll(doc.state, me);
+        // dice come from the OS CSPRNG, not the engine's seeded generator
+        res = engine.roll(doc.state, me, rollDie(), entropy());
         break;
       case "buy":
         res = engine.buy(doc.state, me, Number(body.item));
@@ -326,6 +334,11 @@ export async function applyAction(codeRaw: string, playerId: string, token: stri
           const playFrom = doc.mgStartedAt + MG_COUNTDOWN_MS;
           // a 5s mash can't honestly finish before ~4.5s after the countdown
           if (before.mgType === 0 && now < playFrom + 4500) throw new RoomError("Too early.");
+          // the 15s maths sprint can't honestly finish early
+          if (before.mgType === 4 && now < playFrom + 14000) throw new RoomError("Too early.");
+          // nobody can hit 10 targets or react before the light even came on
+          if (before.mgType === 2 && now < playFrom + engine.mgReactionDelay(before.mgSeed)) throw new RoomError("Too early.");
+          if (before.mgType === 5 && now < playFrom + 1500) throw new RoomError("Too early.");
         }
         res = engine.submit(doc.state, me, Math.trunc(Number(body.raw)));
         break;
@@ -376,6 +389,14 @@ function narrate(doc: RoomDoc, before: ReturnType<typeof decodeState>, after: Re
   const spaceLabel = ["a blue space", "a red space", "the Tailor Shop", "Start"];
 
   switch (body.type) {
+    case "orderRoll": {
+      pushLog(doc, "roll", `${name(me)} rolled a ${code} for turn order.`, { playerId: id(me), value: code });
+      if (after.phase === Phase.ROLL) {
+        const order = [...after.players].sort((a, b) => a.seat - b.seat).map((p) => `${name(p.index)} (${p.orderRoll})`);
+        pushLog(doc, "info", `Turn order: ${order.join(" → ")}. ${name(after.cur)} goes first!`);
+      }
+      break;
+    }
     case "roll": {
       const delta = after.lastDelta;
       const tail =
