@@ -13,6 +13,10 @@ interface Props {
   overlay?: (player: PublicPlayer) => React.ReactNode;
   highlightId?: string;
   dimIds?: string[];
+  /** Called when any peer says "the room changed". */
+  onPoke?: () => void;
+  /** Filled with a function that pokes every connected peer. */
+  pokeRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 type Sig =
@@ -40,7 +44,7 @@ function iceServers(): RTCIceServer[] {
  * never offer at once. Signalling is relayed through the Vercel API routes.
  * Media never touches our server.
  */
-export function WebcamGrid({ me, players, sendSignal, subscribeSignals, overlay, highlightId, dimIds = [] }: Props) {
+export function WebcamGrid({ me, players, sendSignal, subscribeSignals, overlay, highlightId, dimIds = [], onPoke, pokeRef }: Props) {
   const [local, setLocal] = useState<MediaStream | null>(null);
   const [ready, setReady] = useState(false);
   const [camError, setCamError] = useState("");
@@ -52,6 +56,9 @@ export function WebcamGrid({ me, players, sendSignal, subscribeSignals, overlay,
   const queued = useRef(new Map<string, RTCIceCandidateInit[]>());
   const contacted = useRef(new Set<string>());
   const createdAt = useRef(new Map<string, number>());
+  const channels = useRef(new Map<string, RTCDataChannel>());
+  const onPokeRef = useRef(onPoke);
+  onPokeRef.current = onPoke;
   const localRef = useRef<MediaStream | null>(null);
   const playersRef = useRef(players);
   playersRef.current = players;
@@ -87,15 +94,31 @@ export function WebcamGrid({ me, players, sendSignal, subscribeSignals, overlay,
     };
   }, []);
 
+  // tiny data channel per pair: "poke" = the room changed, fetch it now.
+  // Saves almost all server polling (which is what costs Redis commands).
+  useEffect(() => {
+    if (!pokeRef) return;
+    pokeRef.current = () => channels.current.forEach((dc) => dc.readyState === "open" && dc.send("p"));
+    return () => {
+      pokeRef.current = null;
+    };
+  }, [pokeRef]);
+
   const send = useCallback((to: string, msg: Sig) => {
     void Promise.resolve(sendRef.current(to, msg)).catch(() => undefined);
   }, []);
 
   const makePeer = useCallback(
-    (peerId: string) => {
+    (peerId: string, initiator: boolean) => {
       pcs.current.get(peerId)?.close();
       const pc = new RTCPeerConnection({ iceServers: iceServers() });
       pcs.current.set(peerId, pc);
+      const wire = (dc: RTCDataChannel) => {
+        channels.current.set(peerId, dc);
+        dc.onmessage = () => onPokeRef.current?.();
+      };
+      if (initiator) wire(pc.createDataChannel("poke"));
+      else pc.ondatachannel = (e) => wire(e.channel);
       createdAt.current.set(peerId, Date.now());
       const stream = localRef.current;
       if (stream) stream.getTracks().forEach((t) => pc.addTrack(t, stream));
@@ -119,7 +142,7 @@ export function WebcamGrid({ me, players, sendSignal, subscribeSignals, overlay,
 
   const offerTo = useCallback(
     async (peerId: string) => {
-      const pc = makePeer(peerId);
+      const pc = makePeer(peerId, true);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       send(peerId, { t: "offer", sdp: pc.localDescription!.toJSON() });
@@ -145,7 +168,7 @@ export function WebcamGrid({ me, players, sendSignal, subscribeSignals, overlay,
           // ignore the echo of a simultaneous start; a real reload comes much later
           if (me.id < from && Date.now() - (createdAt.current.get(from) ?? 0) > 3000) await offerTo(from);
         } else if (data.t === "offer") {
-          const pc = makePeer(from);
+          const pc = makePeer(from, false);
           await pc.setRemoteDescription(data.sdp);
           await flushQueued(from, pc);
           const answer = await pc.createAnswer();

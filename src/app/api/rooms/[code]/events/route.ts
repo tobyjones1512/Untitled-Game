@@ -7,7 +7,13 @@ export const runtime = "nodejs";
 // ~50s then says goodbye; EventSource reconnects on its own (retry: 300).
 export const maxDuration = 60;
 
-const POLL_MS = 1000;
+// Redis commands are the scarce resource on the free Upstash tier (500K/month).
+// Poll quickly for the first few seconds of a stream (catches the initial state
+// and WebRTC handshakes), then slowly. Live updates normally arrive instantly via
+// a peer "poke" over the WebRTC data channel, so this is only the fallback.
+const FAST_MS = 1000;
+const FAST_FOR_MS = 3000;
+const SLOW_MS = 5000;
 const LIFETIME_MS = 50_000;
 
 /**
@@ -52,7 +58,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ code: st
           }
           for (const s of sigs ?? []) controller.enqueue(enc.encode(`event: signal\ndata: ${s}\n\n`));
           controller.enqueue(enc.encode(": hb\n\n"));
-          await new Promise((r) => setTimeout(r, POLL_MS));
+          await new Promise((r) => setTimeout(r, Date.now() - started < FAST_FOR_MS ? FAST_MS : SLOW_MS));
         }
         if (!closed) send("bye", {});
       } catch (e) {

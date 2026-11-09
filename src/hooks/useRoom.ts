@@ -53,6 +53,16 @@ export function useRoom(code: string, creds: Creds | null) {
     setRoom((prev) => (prev && prev.version > r.version ? prev : r));
   }, []);
 
+  /** Fetch the latest snapshot now (used when a peer pokes us over WebRTC). */
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/rooms/${code}`, { cache: "no-store" });
+      if (res.ok) applyRoom((await res.json()) as PublicRoom);
+    } catch {
+      /* the SSE fallback will catch up */
+    }
+  }, [code, applyRoom]);
+
   const subscribeSignals = useCallback((cb: (m: SignalMessage) => void) => {
     subs.current.add(cb);
     const pending = buffer.current.splice(0);
@@ -64,5 +74,5 @@ export function useRoom(code: string, creds: Creds | null) {
 
   const serverNow = useCallback(() => Date.now() + offset.current, []);
 
-  return { room, connection, deniedReason, applyRoom, subscribeSignals, serverNow };
+  return { room, connection, deniedReason, applyRoom, refresh, subscribeSignals, serverNow };
 }

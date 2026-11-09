@@ -69,9 +69,11 @@ second browser.
 ## Deploy to Vercel
 
 1. Create a **new** Vercel project from this repo (framework: Next.js, no extra build settings).
-2. Add a Redis store: **Storage / Marketplace > Upstash Redis** and connect it to the project. It injects
-   `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_URL` / `KV_REST_API_TOKEN`, also supported).
-   **This is required in production**: without it each serverless instance has its own memory and rooms break.
+2. Add a **free** Redis store. Easiest: sign up at [console.upstash.com](https://console.upstash.com) (no credit card),
+   create a Redis database on the **Free** plan (256 MB, 500K commands/month), copy its REST URL and token, and add them
+   to the Vercel project as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. If you use the Vercel Marketplace
+   integration instead, make sure you pick the Free plan. `KV_REST_API_URL` / `KV_REST_API_TOKEN` also work.
+   **A store is required in production**: without one each serverless instance has its own memory and rooms break.
 3. Optional: set `NEXT_PUBLIC_TURN_URL`, `NEXT_PUBLIC_TURN_USERNAME`, `NEXT_PUBLIC_TURN_CREDENTIAL` for a TURN relay.
    STUN-only (the default) works on most home networks but fails behind strict/symmetric NATs.
 
@@ -80,6 +82,7 @@ second browser.
 - Minigame results are reported by each client and only sanity-checked (cap on taps, minimum play time, score
   clamping). Fine for friends, not for competitive play.
 - Whether someone actually removes the item is on the honour system and the webcam, as with any strip game.
-- SSE polling costs about 1 Redis command per player per second while connected; the free Upstash tier is fine for
-  occasional games.
+- Redis usage: players "poke" each other over a WebRTC data channel when the room changes (about 150 ms), so the SSE
+  stream only polls Redis every 5s as a fallback (about 0.5 commands/s per player, roughly 70 hours of 4-player play
+  per month on the free tier). If a player's WebRTC link is down they fall back to ~5s updates.
 - Rooms expire 6 hours after their last change.

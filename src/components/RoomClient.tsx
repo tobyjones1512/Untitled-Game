@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlayerForm } from "./PlayerForm";
 import { Lobby } from "./Lobby";
 import { Gameboard } from "./Gameboard";
@@ -70,7 +70,8 @@ function JoinPrompt({ code, onJoined }: { code: string; onJoined: (c: Creds) => 
 }
 
 function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft: () => void }) {
-  const { room, connection, deniedReason, applyRoom, subscribeSignals, serverNow } = useRoom(code, creds);
+  const { room, connection, deniedReason, applyRoom, refresh, subscribeSignals, serverNow } = useRoom(code, creds);
+  const pokeRef = useRef<(() => void) | null>(null);
   const engine = useEngine();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -83,6 +84,7 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
       try {
         const res = await sendAction(code, creds, action);
         applyRoom(res.room);
+        pokeRef.current?.();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Action failed.");
       } finally {
@@ -197,6 +199,8 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
             sendSignal={signal}
             subscribeSignals={subscribeSignals}
             highlightId={currentId}
+            onPoke={refresh}
+            pokeRef={pokeRef}
             dimIds={view ? room.players.filter((p) => !view.players[p.index]?.alive).map((p) => p.id) : []}
             overlay={(p) => {
               const pv = view?.players[p.index];
