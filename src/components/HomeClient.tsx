@@ -1,26 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { MatchSearch } from "./MatchSearch";
+import { useState } from "react";
 import { usePresence } from "@/hooks/usePresence";
 import { PlayerForm } from "./PlayerForm";
-import { createRoom, devVerify, getMatchConfig, joinQueue, joinRoom, type MatchConfig } from "@/lib/client/api";
+import { createRoom, joinRoom } from "@/lib/client/api";
 import { saveCreds } from "@/lib/client/session";
 
 export function HomeClient() {
   const router = useRouter();
-  const [mode, setMode] = useState<"create" | "join" | "match">("create");
+  const [mode, setMode] = useState<"create" | "join">("create");
   const online = usePresence();
-  const [match, setMatch] = useState<MatchConfig | null>(null);
-  const [ticket, setTicket] = useState<string | null>(null);
-  useEffect(() => {
-    getMatchConfig().then((c) => {
-      setMatch(c);
-      if (c.enabled && new URLSearchParams(window.location.search).get("match")) setMode("match");
-    });
-  }, []);
-  const stopSearch = useCallback(() => setTicket(null), []);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -65,8 +55,8 @@ export function HomeClient() {
       </section>
 
       <section className="card w-full max-w-md p-5 sm:p-6">
-        <div role="tablist" className={`mb-5 grid rounded-xl bg-black/30 p-1 ${match?.enabled ? "grid-cols-3" : "grid-cols-2"}`}>
-          {(match?.enabled ? (["create", "join", "match"] as const) : (["create", "join"] as const)).map((m) => (
+        <div role="tablist" className="mb-5 grid grid-cols-2 rounded-xl bg-black/30 p-1">
+          {(["create", "join"] as const).map((m) => (
             <button
               key={m}
               role="tab"
@@ -77,7 +67,7 @@ export function HomeClient() {
                 setError("");
               }}
             >
-              {m === "create" ? "Host a room" : m === "join" ? "Join a room" : "Quick match"}
+              {m === "create" ? "Host a room" : "Join a room"}
             </button>
           ))}
         </div>
@@ -98,51 +88,6 @@ export function HomeClient() {
           </div>
         )}
 
-        {mode === "match" ? (
-          ticket ? (
-            <MatchSearch ticket={ticket} onCancel={stopSearch} />
-          ) : !match?.verified ? (
-            <div className="space-y-4 text-center">
-              <p className="font-display text-xl font-black">Verify you're an adult</p>
-              <p className="text-sm text-white/65">
-                Playing with strangers is only for verified adults, because this game is played on camera. Verification is quick and we only keep a pass/fail result.
-              </p>
-              {match?.dev ? (
-                <button
-                  className="btn-primary w-full"
-                  onClick={async () => {
-                    await devVerify();
-                    setMatch(await getMatchConfig());
-                  }}
-                >
-                  Dev: pretend I'm verified
-                </button>
-              ) : (
-                <a className="btn-primary w-full" href={match?.verifyUrl ?? "#"}>
-                  Verify my age
-                </a>
-              )}
-            </div>
-          ) : (
-            <PlayerForm
-              submitLabel="Find players"
-              busy={busy}
-              error={error}
-              extraConsent="I understand I'll be matched with people I don't know. I can leave or tap out at any time, and I won't record or share anyone's video."
-              onSubmit={async ({ name, gender, consent }) => {
-                setError("");
-                setBusy(true);
-                try {
-                  setTicket((await joinQueue(name, gender, consent)).ticket);
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "Something went wrong.");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            />
-          )
-        ) : (
         <PlayerForm
           submitLabel={mode === "create" ? "Create room" : "Join room"}
           busy={busy}
@@ -162,7 +107,6 @@ export function HomeClient() {
             }
           }}
         />
-        )}
       </section>
     </main>
   );

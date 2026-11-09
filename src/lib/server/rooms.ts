@@ -30,8 +30,6 @@ interface RoomDoc {
   mgStartedAt: number | null;
   mgDeadline: number | null;
   voteDeadline: number | null;
-  /** Matched with strangers via the public queue (age-verified players only). */
-  public?: boolean;
   nextLogId: number;
   log: LogEntry[];
 }
@@ -60,7 +58,7 @@ export function normaliseCode(raw: string): string {
   return raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
 }
 
-export function cleanName(raw: unknown): string {
+function cleanName(raw: unknown): string {
   const n = String(raw ?? "")
     .replace(/[\u0000-\u001f<>]/g, "")
     .trim()
@@ -69,7 +67,7 @@ export function cleanName(raw: unknown): string {
   return n;
 }
 
-export function cleanGender(raw: unknown): Gender {
+function cleanGender(raw: unknown): Gender {
   if (raw === "man" || raw === "woman") return raw;
   throw new RoomError("Pick man or woman (this decides your starting socks and bra).");
 }
@@ -119,7 +117,6 @@ export function toPublic(doc: RoomDoc): PublicRoom {
     mgStartedAt: doc.mgStartedAt,
     mgDeadline: doc.mgDeadline,
     voteDeadline: doc.voteDeadline ?? null,
-    public: !!doc.public,
     serverNow: Date.now(),
     log: doc.log,
   };
@@ -169,13 +166,12 @@ export async function createRoom(nameRaw: unknown, genderRaw: unknown, consent: 
   throw new RoomError("Could not allocate a room code.", 503);
 }
 
-export async function joinRoom(codeRaw: string, nameRaw: unknown, genderRaw: unknown, consent: unknown, verifiedAdult = false) {
+export async function joinRoom(codeRaw: string, nameRaw: unknown, genderRaw: unknown, consent: unknown) {
   if (consent !== true) throw new RoomError("You must confirm you are 18+ and consent to play.");
   const code = normaliseCode(codeRaw);
   const name = cleanName(nameRaw);
   const gender = cleanGender(genderRaw);
   return withRoom(code, async (doc) => {
-    if (doc.public && !verifiedAdult) throw new RoomError("This room requires age verification.", 403);
     if (doc.status !== "lobby") throw new RoomError("That game has already started.", 409);
     if (doc.players.length >= MAX_PLAYERS) throw new RoomError("Room is full (4 players max).", 409);
     if (doc.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
@@ -187,45 +183,6 @@ export async function joinRoom(codeRaw: string, nameRaw: unknown, genderRaw: unk
     await saveRoom(doc);
     return { code, playerId: player.id, token: player.token };
   });
-}
-
-/** Create a lobby pre-filled with matched strangers. Players are already authenticated by the queue. */
-export async function createPublicRoom(players: RoomPlayer[]): Promise<string> {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const code = newCode();
-    const doc: RoomDoc = {
-      code,
-      version: 1,
-      hostId: players[0].id,
-      status: "lobby",
-      players,
-      state: null,
-      mgStartedAt: null,
-      mgDeadline: null,
-      voteDeadline: null,
-      public: true,
-      nextLogId: 1,
-      log: [],
-    };
-    pushLog(doc, "info", `Matched ${players.length} players. ${players[0].name} is the host and starts the game when everyone is ready.`);
-    const ok = await run(["SET", roomKey(code), JSON.stringify(doc), "NX", "EX", ROOM_TTL_S]);
-    if (ok === "OK") return code;
-  }
-  throw new RoomError("Could not allocate a room code.", 503);
-}
-
-/** Record a report about another player in the same room (reviewed out-of-band). */
-export async function reportPlayer(codeRaw: string, playerId: string, token: string, targetId: string, reason: unknown) {
-  const code = normaliseCode(codeRaw);
-  const doc = await loadRoom(code);
-  if (!doc) throw new RoomError("Room not found.", 404);
-  authPlayer(doc, playerId, token);
-  if (!doc.players.some((p) => p.id === targetId) || targetId === playerId) throw new RoomError("Unknown player.");
-  const entry = { at: Date.now(), room: code, reporter: playerId, target: targetId, targetName: doc.players.find((p) => p.id === targetId)?.name, reason: String(reason ?? "").slice(0, 300) };
-  await exec([
-    ["RPUSH", "reports", JSON.stringify(entry)],
-    ["EXPIRE", "reports", 30 * 24 * 3600],
-  ] as Cmd[]);
 }
 
 export async function getPublicRoom(codeRaw: string): Promise<PublicRoom> {

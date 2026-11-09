@@ -14,7 +14,7 @@ import { Modal } from "./Modal";
 import { useRoom } from "@/hooks/useRoom";
 import { usePresence } from "@/hooks/usePresence";
 import { useEngine } from "@/hooks/useEngine";
-import { joinRoom, reportPlayer, sendAction, sendSignal } from "@/lib/client/api";
+import { joinRoom, sendAction, sendSignal } from "@/lib/client/api";
 import { clearCreds, loadCreds, saveCreds, type Creds } from "@/lib/client/session";
 import { Phase, decodeState } from "@/lib/wasm/engine";
 import type { ActionBody } from "@/lib/types";
@@ -77,8 +77,6 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmQuit, setConfirmQuit] = useState(false);
-  const [reporting, setReporting] = useState(false);
-  const [reported, setReported] = useState(false);
 
   const act = useCallback(
     async (action: ActionBody) => {
@@ -189,11 +187,6 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
           {connection !== "live" && <span className="text-xs text-amber-300">reconnecting...</span>}
         </div>
         <div className="flex gap-2">
-          {room.public && (
-            <button className="btn-ghost" onClick={() => setReporting(true)}>
-              Report
-            </button>
-          )}
           {playing && !iAmOut && room.status === "playing" && (
             <button className="btn-danger" onClick={() => setConfirmQuit(true)}>
               Tap out
@@ -279,41 +272,6 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
       )}
 
       {room.status === "over" && view && <GameOver view={view} room={room} />}
-
-      {reporting && (
-        <Modal title="Report a player">
-          <p className="text-sm text-white/65">Reports are reviewed. You can also tap out or leave at any time.</p>
-          {reported ? (
-            <p className="mt-4 rounded-xl bg-emerald-400/10 p-3 text-sm text-emerald-100">Thanks, we've recorded your report.</p>
-          ) : (
-            <div className="mt-4 grid gap-2">
-              {room.players
-                .filter((p) => p.id !== me.id)
-                .map((p) => (
-                  <button
-                    key={p.id}
-                    className="btn-danger justify-start"
-                    onClick={async () => {
-                      await reportPlayer(code, creds, p.id, "reported from room").catch(() => undefined);
-                      setReported(true);
-                    }}
-                  >
-                    Report {p.name}
-                  </button>
-                ))}
-            </div>
-          )}
-          <button
-            className="btn-ghost mt-4 w-full"
-            onClick={() => {
-              setReporting(false);
-              setReported(false);
-            }}
-          >
-            Close
-          </button>
-        </Modal>
-      )}
 
       {confirmQuit && (
         <Modal title="Tap out?">

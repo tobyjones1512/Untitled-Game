@@ -29,8 +29,6 @@ export interface PublicRoom {
   mgStartedAt: number | null;
   mgDeadline: number | null;
   voteDeadline: number | null;
-  /** True for rooms formed by stranger matchmaking. */
-  public: boolean;
   serverNow: number;
   log: LogEntry[];
 }
