@@ -1,0 +1,225 @@
+import { GAME_WASM_BASE64 } from "./embedded";
+
+/** Game phases, mirrored from assembly/index.ts. */
+export const Phase = {
+  LOBBY: 0,
+  ROLL: 1,
+  SHOP: 2,
+  MINI: 3,
+  STRIP: 4,
+  OVER: 5,
+} as const;
+
+export const ITEMS = [
+  { id: 0, name: "Shirt", icon: "👕" },
+  { id: 1, name: "Pants / Skirt", icon: "👖" },
+  { id: 2, name: "Underwear", icon: "🩲" },
+  { id: 3, name: "Shoes", icon: "👟" },
+  { id: 4, name: "Socks", icon: "🧦" },
+  { id: 5, name: "Bra", icon: "👙" },
+] as const;
+
+export const MINIGAMES = [
+  { id: 0, name: "Tap Frenzy", blurb: "Mash the button as many times as you can in 5 seconds." },
+  { id: 1, name: "Stop the Clock", blurb: "The timer hides after 2 seconds. Stop it as close to the target as you can." },
+] as const;
+
+export type Gender = "man" | "woman";
+
+// state layout, mirrored from assembly/index.ts
+const HEADER = 16;
+const STRIDE = 16;
+
+export interface PlayerView {
+  index: number;
+  alive: boolean;
+  coins: number;
+  pos: number;
+  gender: Gender;
+  items: number[]; // counts per ITEMS entry
+  total: number;
+  mgRaw: number;
+  mgScore: number;
+  mgDone: boolean;
+  mgRank: number;
+}
+
+export interface GameView {
+  phase: number;
+  n: number;
+  cur: number;
+  round: number;
+  lastRoll: number;
+  stripTarget: number;
+  winner: number;
+  mgType: number;
+  mgSeed: number;
+  returnPhase: number;
+  stripper: number;
+  lastSpace: number;
+  lastDelta: number;
+  mgWinner: number;
+  players: PlayerView[];
+}
+
+export function decodeState(s: number[]): GameView {
+  const n = s[1];
+  const players: PlayerView[] = [];
+  for (let i = 0; i < n; i++) {
+    const b = HEADER + i * STRIDE;
+    players.push({
+      index: i,
+      alive: s[b] === 1,
+      coins: s[b + 1],
+      pos: s[b + 2],
+      gender: s[b + 3] === 1 ? "woman" : "man",
+      items: s.slice(b + 4, b + 10),
+      total: s[b + 10],
+      mgRaw: s[b + 11],
+      mgScore: s[b + 12],
+      mgDone: s[b + 13] === 1,
+      mgRank: s[b + 14],
+    });
+  }
+  return {
+    phase: s[0],
+    n,
+    cur: s[2],
+    round: s[3],
+    lastRoll: s[4],
+    stripTarget: s[5],
+    winner: s[6],
+    mgType: s[8],
+    mgSeed: s[9],
+    returnPhase: s[10],
+    stripper: s[11],
+    lastSpace: s[12],
+    lastDelta: s[13],
+    mgWinner: s[14],
+    players,
+  };
+}
+
+interface WasmExports {
+  memory: WebAssembly.Memory;
+  statePtr(): number;
+  stateSize(): number;
+  boardSize(): number;
+  spaceType(i: number): number;
+  startCount(item: number, gender: number): number;
+  costRestore(): number;
+  costForce(): number;
+  blueCoins(): number;
+  redCoins(): number;
+  mgTarget(seed: number): number;
+  mgScore(type: number, raw: number, seed: number): number;
+  initGame(n: number, seed: number, femaleMask: number): number;
+  actRoll(p: number): number;
+  actShopBuy(p: number, item: number): number;
+  actShopForce(p: number, target: number): number;
+  actShopLeave(p: number): number;
+  actSubmit(p: number, raw: number): number;
+  actStrip(p: number, item: number): number;
+  actForfeit(p: number): number;
+}
+
+export interface ActionResult {
+  /** >= 0 on success, negative error code otherwise. */
+  code: number;
+  state: number[];
+}
+
+export const ERRORS: Record<number, string> = {
+  [-1]: "That isn't allowed in this phase.",
+  [-2]: "It isn't your move.",
+  [-3]: "Invalid choice.",
+  [-4]: "Not enough coins, or nothing to do.",
+};
+
+/** Thin stateless wrapper: load a state array, run one Wasm action, read it back. */
+export class Engine {
+  constructor(private readonly ex: WasmExports) {}
+
+  private view(): Int32Array {
+    return new Int32Array(this.ex.memory.buffer, this.ex.statePtr(), this.ex.stateSize());
+  }
+
+  private run(state: number[], fn: (ex: WasmExports) => number): ActionResult {
+    this.view().set(state);
+    const code = fn(this.ex);
+    return { code, state: Array.from(this.view()) };
+  }
+
+  get boardSize() {
+    return this.ex.boardSize();
+  }
+  spaceType(i: number) {
+    return this.ex.spaceType(i);
+  }
+  startCount(item: number, gender: Gender) {
+    return this.ex.startCount(item, gender === "woman" ? 1 : 0);
+  }
+  get costRestore() {
+    return this.ex.costRestore();
+  }
+  get costForce() {
+    return this.ex.costForce();
+  }
+  get blueCoins() {
+    return this.ex.blueCoins();
+  }
+  get redCoins() {
+    return this.ex.redCoins();
+  }
+  mgTarget(seed: number) {
+    return this.ex.mgTarget(seed);
+  }
+  mgScore(type: number, raw: number, seed: number) {
+    return this.ex.mgScore(type, raw, seed);
+  }
+
+  init(genders: Gender[], seed: number): ActionResult {
+    const mask = genders.reduce((m, g, i) => (g === "woman" ? m | (1 << i) : m), 0);
+    return this.run(new Array(this.ex.stateSize()).fill(0), (ex) => ex.initGame(genders.length, seed | 0, mask));
+  }
+  roll(s: number[], p: number) {
+    return this.run(s, (ex) => ex.actRoll(p));
+  }
+  buy(s: number[], p: number, item: number) {
+    return this.run(s, (ex) => ex.actShopBuy(p, item));
+  }
+  force(s: number[], p: number, target: number) {
+    return this.run(s, (ex) => ex.actShopForce(p, target));
+  }
+  leaveShop(s: number[], p: number) {
+    return this.run(s, (ex) => ex.actShopLeave(p));
+  }
+  submit(s: number[], p: number, raw: number) {
+    return this.run(s, (ex) => ex.actSubmit(p, raw));
+  }
+  strip(s: number[], p: number, item: number) {
+    return this.run(s, (ex) => ex.actStrip(p, item));
+  }
+  forfeit(s: number[], p: number) {
+    return this.run(s, (ex) => ex.actForfeit(p));
+  }
+}
+
+function decodeBase64(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+let cached: Promise<Engine> | null = null;
+
+/** Instantiates the embedded Wasm module once (async: browsers reject big sync compiles). */
+export function getEngine(): Promise<Engine> {
+  if (!cached) {
+    cached = WebAssembly.instantiate(decodeBase64(GAME_WASM_BASE64) as BufferSource, {}).then(
+      ({ instance }) => new Engine(instance.exports as unknown as WasmExports),
+    );
+  }
+  return cached;
+}

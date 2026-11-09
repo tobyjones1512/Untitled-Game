@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1100px 600px at 12% -10%, rgba(255, 77, 141, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 100% 0%, rgba(89, 184, 255, 0.12), transparent 55%),
+    #0b0a14;
+  background-attachment: fixed;
+  color: #f3f0ff;
+  font-family: ui-rounded, "SF Pro Rounded", Nunito, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-white/10 bg-ink-800/80 shadow-lg shadow-black/30 backdrop-blur;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition
+      focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-glow-sky
+      disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.97];
+  }
+  .btn-primary {
+    @apply btn bg-gradient-to-br from-glow-pink to-orange-400 text-ink-950 shadow-md shadow-glow-pink/30 hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply btn border border-white/15 bg-white/5 text-white hover:bg-white/10;
+  }
+  .btn-danger {
+    @apply btn border border-red-400/40 bg-red-500/10 text-red-200 hover:bg-red-500/20;
+  }
+  .input {
+    @apply w-full rounded-xl border border-white/15 bg-ink-900 px-3.5 py-2.5 text-base text-white placeholder:text-white/35
+      focus:border-glow-sky focus:outline-none focus:ring-2 focus:ring-glow-sky/40;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-bold uppercase tracking-wider text-white/55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
