@@ -66,6 +66,12 @@ function memExec(cmd: Cmd): unknown {
       if (e.value.length === 0) mem.delete(key);
       return out;
     }
+    case "INCR": {
+      const e = memGet(key);
+      const n = (e && typeof e.value === "string" ? Number(e.value) : 0) + 1;
+      mem.set(key, { value: String(n), expiresAt: e?.expiresAt ?? null });
+      return n;
+    }
     case "EXPIRE": {
       const e = memGet(key);
       if (!e) return 0;

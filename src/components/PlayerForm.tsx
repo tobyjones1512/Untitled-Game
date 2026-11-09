@@ -8,6 +8,8 @@ interface Props {
   busy: boolean;
   error: string;
   onSubmit: (v: { name: string; gender: Gender; consent: true }) => void;
+  /** Extra required checkbox (used for stranger matchmaking). */
+  extraConsent?: string;
 }
 
 const CONSENT = [
@@ -16,11 +18,12 @@ const CONSENT = [
   "I understand anyone can tap out at any time, for any reason, and the game simply continues.",
 ];
 
-export function PlayerForm({ submitLabel, busy, error, onSubmit }: Props) {
+export function PlayerForm({ submitLabel, busy, error, onSubmit, extraConsent }: Props) {
+  const consentList = extraConsent ? [...CONSENT, extraConsent] : CONSENT;
   const [name, setName] = useState("");
   const [gender, setGender] = useState<Gender | null>(null);
-  const [checks, setChecks] = useState<boolean[]>(CONSENT.map(() => false));
-  const ready = name.trim().length > 0 && gender !== null && checks.every(Boolean);
+  const [checks, setChecks] = useState<boolean[]>([]);
+  const ready = name.trim().length > 0 && gender !== null && consentList.every((_, i) => checks[i]);
 
   return (
     <form
@@ -63,13 +66,13 @@ export function PlayerForm({ submitLabel, busy, error, onSubmit }: Props) {
 
       <fieldset className="space-y-2.5 rounded-xl border border-white/10 bg-black/20 p-3.5">
         <legend className="label px-1">Before you play</legend>
-        {CONSENT.map((text, i) => (
+        {consentList.map((text, i) => (
           <label key={i} className="flex cursor-pointer items-start gap-2.5 text-sm leading-snug text-white/80">
             <input
               type="checkbox"
               className="mt-0.5 h-4 w-4 shrink-0 accent-pink-500"
-              checked={checks[i]}
-              onChange={(e) => setChecks((c) => c.map((v, j) => (j === i ? e.target.checked : v)))}
+              checked={!!checks[i]}
+              onChange={(e) => setChecks((c) => consentList.map((_, j) => (j === i ? e.target.checked : !!c[j])))}
             />
             <span>{text}</span>
           </label>

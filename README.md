@@ -77,6 +77,28 @@ second browser.
 3. Optional: set `NEXT_PUBLIC_TURN_URL`, `NEXT_PUBLIC_TURN_USERNAME`, `NEXT_PUBLIC_TURN_CREDENTIAL` for a TURN relay.
    STUN-only (the default) works on most home networks but fails behind strict/symmetric NATs.
 
+## Playing with strangers (off by default)
+
+A "Quick match" tab puts verified adults into a public queue; a room forms as soon as 2-4 are waiting. Because the
+game is played on camera, **this stays disabled until a real age-verification provider is plugged in**. A checkbox is
+not verification.
+
+It is only enabled when all of these are set (otherwise the tab is hidden and every endpoint returns 404/403):
+
+| Variable | Purpose |
+|---|---|
+| `STRANGERS_ENABLED=1` | master switch |
+| `AGE_COOKIE_SECRET` | long random string that signs the pass/fail "verified adult" cookie |
+| `AGE_VERIFICATION_URL` | where players are sent to verify (your provider's start URL) |
+
+Then implement `src/app/api/age/callback/route.ts` (currently a `501` stub with instructions): verify the provider's
+result server-side and call `mintAdultCookie()`. Store only the signed pass/fail cookie, never IDs or birth dates.
+Joining a matchmade room (even with its code) also requires that cookie. Matchmaking is rate limited per IP, and rooms
+formed this way show a **Report** button (reports are stored in the `reports` Redis list for review).
+
+For local testing only: `STRANGERS_ENABLED=1 AGE_VERIFICATION_PROVIDER=dev npm run dev` shows a "pretend I'm
+verified" button. The dev provider is refused when `VERCEL_ENV=production`.
+
 ## Known limits
 
 - Minigame results are reported by each client and only sanity-checked (cap on taps, minimum play time, score
