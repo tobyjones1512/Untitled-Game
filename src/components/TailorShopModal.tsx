@@ -29,13 +29,20 @@ export function TailorShopModal({ engine, view, room, meIndex, busy, act }: Prop
 
       <section className="mt-5">
         <h3 className="label">Put an item back on · {engine.costRestore} coins</h3>
+        <p className="mb-2 text-xs text-white/45">Dress in order: underwear, bra, socks, shoes, pants, shirt.</p>
         {missing.length === 0 ? (
           <p className="rounded-xl bg-white/5 p-3 text-sm text-white/55">You haven't lost anything yet. Nice.</p>
         ) : (
           <div className="grid grid-cols-2 gap-2">
             {missing.map((it) => (
-              <button key={it.id} className="btn-ghost justify-start" disabled={busy || !canRestore} onClick={() => act({ type: "buy", item: it.id })}>
-                <span className="text-lg">{it.icon}</span> {it.name}
+              <button
+                key={it.id}
+                className="btn-ghost justify-start"
+                disabled={busy || !canRestore || !engine.canRestore(room.state!, meIndex, it.id)}
+                title={engine.canRestore(room.state!, meIndex, it.id) ? undefined : "Put the layers underneath back on first"}
+                onClick={() => act({ type: "buy", item: it.id })}
+              >
+                {it.name}
               </button>
             ))}
           </div>

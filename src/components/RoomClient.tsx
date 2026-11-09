@@ -10,7 +10,6 @@ import { TailorShopModal } from "./TailorShopModal";
 import { StripModal } from "./StripModal";
 import { MiniGame } from "./MiniGame";
 import { GameOver } from "./GameOver";
-import { InventoryBadges } from "./InventoryBadges";
 import { Modal } from "./Modal";
 import { useRoom } from "@/hooks/useRoom";
 import { useEngine } from "@/hooks/useEngine";
@@ -108,6 +107,30 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
     return () => clearInterval(t);
   }, [deadline, code, creds, serverNow, applyRoom]);
 
+  // same for the voting timer
+  const voteDeadline = room?.voteDeadline ?? null;
+  useEffect(() => {
+    if (!voteDeadline) return;
+    const t = setInterval(() => {
+      if (serverNow() > voteDeadline + 400) {
+        sendAction(code, creds, { type: "voteTimeout" }).then((r) => applyRoom(r.room)).catch(() => undefined);
+      }
+    }, 1500);
+    return () => clearInterval(t);
+  }, [voteDeadline, code, creds, serverNow, applyRoom]);
+
+  // the minigame is queued behind a short pause; re-render until it actually starts
+  const mgStartedAt = room?.mgStartedAt ?? null;
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!mgStartedAt) return;
+    const t = setInterval(() => {
+      setTick((n) => n + 1);
+      if (serverNow() >= mgStartedAt) clearInterval(t);
+    }, 100);
+    return () => clearInterval(t);
+  }, [mgStartedAt, serverNow]);
+
   const signal = useCallback((to: string, data: unknown) => sendSignal(code, creds, to, data).then(() => undefined), [code, creds]);
 
   if (connection === "denied") {
@@ -177,7 +200,7 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="order-2 lg:order-1">
           {playing ? (
-            <Gameboard engine={engine} room={room} view={view} meIndex={me.index} busy={busy} act={act} />
+            <Gameboard engine={engine} room={room} view={view} meIndex={me.index} busy={busy} act={act} minigamePending={view.phase === Phase.MINI && !!room.mgStartedAt && serverNow() < room.mgStartedAt} />
           ) : (
             <Lobby
               room={room}
@@ -206,9 +229,9 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
               const pv = view?.players[p.index];
               if (!pv) return null;
               return (
-                <div className="flex items-center justify-between gap-2">
-                  <InventoryBadges engine={engine} player={pv} size="sm" />
-                  <span className="shrink-0 text-xs font-black text-glow-amber">🪙 {pv.coins}</span>
+                <div className="flex items-center justify-between gap-2 text-xs font-black">
+                  <span className="text-white/70">{pv.alive ? `${pv.total}/7 items` : "Out"}</span>
+                  <span className="text-glow-amber">🪙 {pv.coins}</span>
                 </div>
               );
             }}
@@ -221,10 +244,10 @@ function RoomView({ code, creds, onLeft }: { code: string; creds: Creds; onLeft:
           {view.phase === Phase.SHOP && view.cur === me.index && (
             <TailorShopModal engine={engine} view={view} room={room} meIndex={me.index} busy={busy} act={act} />
           )}
-          {view.phase === Phase.STRIP && view.stripTarget === me.index && (
-            <StripModal view={view} room={room} meIndex={me.index} busy={busy} act={act} />
+          {view.phase === Phase.STRIP && (
+            <StripModal engine={engine} view={view} room={room} meIndex={me.index} busy={busy} act={act} serverNow={serverNow} />
           )}
-          {view.phase === Phase.MINI && room.mgStartedAt && (
+          {view.phase === Phase.MINI && room.mgStartedAt && serverNow() >= room.mgStartedAt && (
             <MiniGame
               key={`${view.round}`}
               engine={engine}

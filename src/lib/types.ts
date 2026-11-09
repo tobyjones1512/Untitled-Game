@@ -28,6 +28,7 @@ export interface PublicRoom {
   state: number[] | null;
   mgStartedAt: number | null;
   mgDeadline: number | null;
+  voteDeadline: number | null;
   serverNow: number;
   log: LogEntry[];
 }
@@ -40,6 +41,8 @@ export type ActionBody =
   | { type: "force"; target: number }
   | { type: "leaveShop" }
   | { type: "submit"; raw: number }
+  | { type: "vote"; item: number }
+  | { type: "voteTimeout" }
   | { type: "strip"; item: number }
   | { type: "forfeit" }
   | { type: "mgTimeout" };

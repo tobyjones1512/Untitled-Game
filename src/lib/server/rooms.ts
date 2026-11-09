@@ -8,6 +8,9 @@ const MAX_PLAYERS = 4;
 const MAX_LOG = 40;
 const MG_COUNTDOWN_MS = 3000;
 const MG_DEADLINE_MS = 22_000;
+// breathing room between the last move of a lap and the minigame popping up
+const MG_PAUSE_MS = 4000;
+const VOTE_MS = 30_000;
 
 interface RoomPlayer {
   id: string;
@@ -25,6 +28,7 @@ interface RoomDoc {
   state: number[] | null;
   mgStartedAt: number | null;
   mgDeadline: number | null;
+  voteDeadline: number | null;
   nextLogId: number;
   log: LogEntry[];
 }
@@ -111,6 +115,7 @@ export function toPublic(doc: RoomDoc): PublicRoom {
     state: doc.state,
     mgStartedAt: doc.mgStartedAt,
     mgDeadline: doc.mgDeadline,
+    voteDeadline: doc.voteDeadline ?? null,
     serverNow: Date.now(),
     log: doc.log,
   };
@@ -148,6 +153,7 @@ export async function createRoom(nameRaw: unknown, genderRaw: unknown, consent: 
       state: null,
       mgStartedAt: null,
       mgDeadline: null,
+      voteDeadline: null,
       nextLogId: 1,
       log: [],
     };
@@ -257,6 +263,15 @@ export async function applyAction(codeRaw: string, playerId: string, token: stri
       case "leaveShop":
         res = engine.leaveShop(doc.state, me);
         break;
+      case "vote":
+        res = engine.vote(doc.state, me, Number(body.item));
+        break;
+      case "voteTimeout":
+        if (before.phase !== Phase.STRIP || before.voteItem >= 0 || !doc.voteDeadline || now < doc.voteDeadline) {
+          throw new RoomError("Voting is still open.", 409);
+        }
+        res = engine.voteClose(doc.state);
+        break;
       case "strip":
         res = engine.strip(doc.state, me, Number(body.item));
         break;
@@ -293,11 +308,17 @@ export async function applyAction(codeRaw: string, playerId: string, token: stri
     narrate(doc, before, after, body, me, res.code);
 
     if (after.phase === Phase.MINI && before.phase !== Phase.MINI) {
-      doc.mgStartedAt = now;
-      doc.mgDeadline = now + MG_DEADLINE_MS;
+      // pause so everyone can see the last move before the minigame takes over
+      doc.mgStartedAt = now + MG_PAUSE_MS;
+      doc.mgDeadline = doc.mgStartedAt + MG_DEADLINE_MS;
     } else if (after.phase !== Phase.MINI) {
       doc.mgStartedAt = null;
       doc.mgDeadline = null;
+    }
+    if (after.phase === Phase.STRIP && after.voteItem < 0) {
+      if (before.phase !== Phase.STRIP || before.voteItem >= 0 || !doc.voteDeadline) doc.voteDeadline = now + VOTE_MS;
+    } else {
+      doc.voteDeadline = null;
     }
     if (after.phase === Phase.OVER) doc.status = "over";
 
@@ -350,8 +371,13 @@ function narrate(doc: RoomDoc, before: ReturnType<typeof decodeState>, after: Re
       break;
   }
 
+  if (before.phase === Phase.STRIP && before.voteItem < 0 && after.voteItem >= 0) {
+    pushLog(doc, "strip", `The vote is in: ${name(after.stripTarget)} takes off their ${ITEMS[after.voteItem]?.name.toLowerCase()}.`, {
+      playerId: id(after.stripTarget),
+    });
+  }
   if (before.phase === Phase.MINI && after.phase === Phase.STRIP) {
-    pushLog(doc, "mini", `${name(after.mgWinner)} won the minigame (+5 coins). ${name(after.stripTarget)} came last and must remove an item on camera.`, {
+    pushLog(doc, "mini", `${name(after.mgWinner)} won the minigame (+5 coins). ${name(after.stripTarget)} came last. Everyone else votes on what comes off!`, {
       playerId: id(after.stripTarget),
     });
   }

@@ -14,9 +14,11 @@ interface Props {
   meIndex: number;
   busy: boolean;
   act: (a: ActionBody) => void;
+  /** The minigame is queued but hasn't started yet (the pause after the last move). */
+  minigamePending?: boolean;
 }
 
-export function Gameboard({ engine, room, view, meIndex, busy, act }: Props) {
+export function Gameboard({ engine, room, view, meIndex, busy, act, minigamePending = false }: Props) {
   const size = engine.boardSize;
   const name = (i: number) => room.players[i]?.name ?? "?";
   const lastRoll = [...room.log].reverse().find((l) => l.kind === "roll");
@@ -75,7 +77,7 @@ export function Gameboard({ engine, room, view, meIndex, busy, act }: Props) {
           })}
 
           <div className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-black/30 p-2 text-center" style={{ gridArea: "2 / 2 / 7 / 7" }}>
-            <TurnPanel {...{ view, room, name, meIndex, myTurn, busy, act, rollId, engine }} />
+            <TurnPanel {...{ view, room, name, meIndex, myTurn, busy, act, rollId, engine, minigamePending }} />
             <Dice value={view.lastRoll} rollId={rollId} />
           </div>
         </div>
@@ -124,6 +126,7 @@ function TurnPanel({
   busy,
   act,
   engine,
+  minigamePending,
 }: {
   view: GameView;
   room: PublicRoom;
@@ -134,6 +137,7 @@ function TurnPanel({
   act: (a: ActionBody) => void;
   rollId: number;
   engine: Engine;
+  minigamePending: boolean;
 }) {
   const me = view.players[meIndex];
   let headline = "";
@@ -148,12 +152,12 @@ function TurnPanel({
       sub = myTurn ? "" : "They're deciding what to buy.";
       break;
     case Phase.MINI:
-      headline = `${MINIGAMES[view.mgType].name}!`;
-      sub = "Everyone's playing";
+      headline = minigamePending ? "Minigame time!" : `${MINIGAMES[view.mgType].name}!`;
+      sub = minigamePending ? "Lap complete. Get ready..." : "Everyone's playing";
       break;
     case Phase.STRIP:
       headline = `${name(view.stripTarget)} strips`;
-      sub = view.stripper >= 0 ? `${name(view.stripper)} paid the tailor.` : "Last place in the minigame.";
+      sub = view.voteItem < 0 ? "Everyone else is voting..." : view.stripper >= 0 ? `${name(view.stripper)} paid the tailor.` : "Last place in the minigame.";
       break;
     case Phase.OVER:
       headline = view.winner >= 0 ? `${name(view.winner)} wins!` : "Draw!";

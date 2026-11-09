@@ -26,6 +26,7 @@ const H_STRIPPER: i32 = 11; // who forced the strip (-1 = minigame loss)
 const H_LASTSPACE: i32 = 12;
 const H_LASTDELTA: i32 = 13;
 const H_MGWINNER: i32 = 14;
+const H_VOTEITEM: i32 = 15; // item chosen by the vote, -1 while voting is open
 
 // per-player fields
 const F_ALIVE: i32 = 0;
@@ -38,6 +39,7 @@ const F_MGRAW: i32 = 11;
 const F_MGSCORE: i32 = 12;
 const F_MGDONE: i32 = 13;
 const F_MGRANK: i32 = 14;
+const F_VOTE: i32 = 15; // item voted for + 1 (0 = no vote yet)
 
 // phases
 const LOBBY: i32 = 0;
@@ -168,6 +170,109 @@ export function mgScore(type: i32, raw: i32, seed: i32): i32 {
   return max<i32>(0, 10000 - d);
 }
 
+// -------------------------------------------------------- clothing order ---
+// A wardrobe is valid when clothes come off (and go back on) in a physically
+// sensible order:
+//   socks only come off once ALL shoes are off
+//   bra only comes off once shirt, pants, shoes and socks are all off
+//   underwear only comes off once everything else is already off
+function isValid(p: i32): bool {
+  const gender = g(P(p, F_GENDER));
+  const shirt = g(P(p, F_ITEMS + 0));
+  const pants = g(P(p, F_ITEMS + 1));
+  const under = g(P(p, F_ITEMS + 2));
+  const shoes = g(P(p, F_ITEMS + 3));
+  const socks = g(P(p, F_ITEMS + 4));
+  const bra = g(P(p, F_ITEMS + 5));
+  if (socks < startCount(4, gender) && shoes > 0) return false;
+  if (bra < startCount(5, gender) && (shirt > 0 || pants > 0 || shoes > 0 || socks > 0)) return false;
+  if (under < startCount(2, gender) && (shirt > 0 || pants > 0 || shoes > 0 || socks > 0 || bra > 0)) return false;
+  return true;
+}
+
+/** Can this player take this item off right now? */
+export function canRemove(p: i32, item: i32): bool {
+  if (!isPlayer(p) || item < 0 || item >= ITEM_KINDS) return false;
+  const i = P(p, F_ITEMS + item);
+  if (g(i) <= 0) return false;
+  s(i, g(i) - 1);
+  const ok = isValid(p);
+  s(i, g(i) + 1);
+  return ok;
+}
+
+/** Can this player put this item back on right now? */
+export function canRestore(p: i32, item: i32): bool {
+  if (!isPlayer(p) || item < 0 || item >= ITEM_KINDS) return false;
+  const i = P(p, F_ITEMS + item);
+  if (g(i) >= startCount(item, g(P(p, F_GENDER)))) return false;
+  s(i, g(i) + 1);
+  const ok = isValid(p);
+  s(i, g(i) - 1);
+  return ok;
+}
+
+function removeItem(p: i32, item: i32): void {
+  s(P(p, F_ITEMS + item), g(P(p, F_ITEMS + item)) - 1);
+  const total = g(P(p, F_TOTAL)) - 1;
+  s(P(p, F_TOTAL), total);
+  if (total <= 0) s(P(p, F_ALIVE), 0);
+}
+
+function beginStrip(target: i32, stripper: i32, ret: i32): void {
+  s(H_TARGET, target);
+  s(H_STRIPPER, stripper);
+  s(H_RETURN, ret);
+  s(H_VOTEITEM, -1);
+  const n = g(H_N);
+  for (let i = 0; i < n; i++) s(P(i, F_VOTE), 0);
+  s(H_PHASE, STRIP);
+}
+
+function allVoted(): bool {
+  const n = g(H_N);
+  const t = g(H_TARGET);
+  for (let i = 0; i < n; i++) {
+    if (i != t && g(P(i, F_ALIVE)) == 1 && g(P(i, F_VOTE)) == 0) return false;
+  }
+  return true;
+}
+
+// Plurality vote among legal items. Ties (and "nobody voted") are broken by the
+// seeded RNG so every machine agrees.
+function resolveVotes(): void {
+  const n = g(H_N);
+  const t = g(H_TARGET);
+  let maxVotes = 0;
+  for (let item = 0; item < ITEM_KINDS; item++) {
+    if (!canRemove(t, item)) continue;
+    let v = 0;
+    for (let i = 0; i < n; i++) if (i != t && g(P(i, F_ALIVE)) == 1 && g(P(i, F_VOTE)) == item + 1) v++;
+    if (v > maxVotes) maxVotes = v;
+  }
+  let mask = 0;
+  let count = 0;
+  for (let item = 0; item < ITEM_KINDS; item++) {
+    if (!canRemove(t, item)) continue;
+    let v = 0;
+    for (let i = 0; i < n; i++) if (i != t && g(P(i, F_ALIVE)) == 1 && g(P(i, F_VOTE)) == item + 1) v++;
+    if (v == maxVotes) {
+      mask |= 1 << item;
+      count++;
+    }
+  }
+  let pick = <i32>(nextRand() % <u32>count);
+  for (let item = 0; item < ITEM_KINDS; item++) {
+    if ((mask >> item) & 1) {
+      if (pick == 0) {
+        s(H_VOTEITEM, item);
+        return;
+      }
+      pick--;
+    }
+  }
+}
+
 // ------------------------------------------------------------ transitions ---
 function finish(): void {
   s(H_PHASE, OVER);
@@ -270,10 +375,7 @@ function resolveMinigame(): void {
   }
   s(P(winner, F_COINS), g(P(winner, F_COINS)) + MG_WIN_BONUS);
   s(H_MGWINNER, winner);
-  s(H_TARGET, loser);
-  s(H_STRIPPER, -1);
-  s(H_RETURN, ROLL);
-  s(H_PHASE, STRIP);
+  beginStrip(loser, -1, ROLL);
 }
 
 // ---------------------------------------------------------------- actions ---
@@ -291,6 +393,7 @@ export function initGame(n: i32, seed: i32, femaleMask: i32): i32 {
   s(H_STRIPPER, -1);
   s(H_MGWINNER, -1);
   s(H_TARGET, -1);
+  s(H_VOTEITEM, -1);
   s(H_PHASE, ROLL);
   s(H_CUR, 0);
   for (let i = 0; i < n; i++) {
@@ -336,6 +439,7 @@ export function actShopBuy(p: i32, item: i32): i32 {
   if (item < 0 || item >= ITEM_KINDS) return -3;
   const gender = g(P(p, F_GENDER));
   if (g(P(p, F_ITEMS + item)) >= startCount(item, gender)) return -3;
+  if (!canRestore(p, item)) return -5;
   if (g(P(p, F_COINS)) < RESTORE_COST) return -4;
   s(P(p, F_COINS), g(P(p, F_COINS)) - RESTORE_COST);
   s(P(p, F_ITEMS + item), g(P(p, F_ITEMS + item)) + 1);
@@ -351,10 +455,7 @@ export function actShopForce(p: i32, target: i32): i32 {
   if (g(P(target, F_ALIVE)) != 1) return -3;
   if (g(P(p, F_COINS)) < FORCE_COST) return -4;
   s(P(p, F_COINS), g(P(p, F_COINS)) - FORCE_COST);
-  s(H_TARGET, target);
-  s(H_STRIPPER, p);
-  s(H_RETURN, SHOP);
-  s(H_PHASE, STRIP);
+  beginStrip(target, p, SHOP);
   return 0;
 }
 
@@ -377,16 +478,32 @@ export function actSubmit(p: i32, raw: i32): i32 {
   return 0;
 }
 
-/** The chosen player removes one item. Hitting zero items eliminates them. */
+/** Other players vote on which item the target removes. Votes can be changed until all are in. */
+export function actVote(p: i32, item: i32): i32 {
+  if (g(H_PHASE) != STRIP) return -1;
+  if (g(H_VOTEITEM) >= 0) return -1;
+  if (!isPlayer(p) || g(P(p, F_ALIVE)) != 1 || p == g(H_TARGET)) return -2;
+  if (item < 0 || item >= ITEM_KINDS || !canRemove(g(H_TARGET), item)) return -5;
+  s(P(p, F_VOTE), item + 1);
+  if (allVoted()) resolveVotes();
+  return 0;
+}
+
+/** Close voting early (the host server calls this once the voting timer runs out). */
+export function actVoteClose(): i32 {
+  if (g(H_PHASE) != STRIP || g(H_VOTEITEM) >= 0) return -1;
+  resolveVotes();
+  return 0;
+}
+
+/** The target confirms they took off the item the vote picked. Zero items eliminates them. */
 export function actStrip(p: i32, item: i32): i32 {
   if (g(H_PHASE) != STRIP) return -1;
   if (p != g(H_TARGET)) return -2;
-  if (item < 0 || item >= ITEM_KINDS) return -3;
-  if (g(P(p, F_ITEMS + item)) <= 0) return -4;
-  s(P(p, F_ITEMS + item), g(P(p, F_ITEMS + item)) - 1);
-  const total = g(P(p, F_TOTAL)) - 1;
-  s(P(p, F_TOTAL), total);
-  if (total <= 0) s(P(p, F_ALIVE), 0);
+  if (g(H_VOTEITEM) < 0) return -4; // vote still open
+  if (item != g(H_VOTEITEM)) return -3;
+  if (!canRemove(p, item)) return -5;
+  removeItem(p, item);
   afterStrip();
   return 0;
 }
@@ -407,6 +524,7 @@ export function actForfeit(p: i32): i32 {
     if (allSubmitted()) resolveMinigame();
   } else if (ph == STRIP) {
     if (p == g(H_TARGET)) afterStrip();
+    else if (g(H_VOTEITEM) < 0 && allVoted()) resolveVotes();
   }
   return 0;
 }

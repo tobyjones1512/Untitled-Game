@@ -42,6 +42,8 @@ export interface PlayerView {
   mgScore: number;
   mgDone: boolean;
   mgRank: number;
+  /** item voted for + 1 (0 = not voted) */
+  vote: number;
 }
 
 export interface GameView {
@@ -59,6 +61,8 @@ export interface GameView {
   lastSpace: number;
   lastDelta: number;
   mgWinner: number;
+  /** item chosen by the vote, -1 while voting is open */
+  voteItem: number;
   players: PlayerView[];
 }
 
@@ -79,6 +83,7 @@ export function decodeState(s: number[]): GameView {
       mgScore: s[b + 12],
       mgDone: s[b + 13] === 1,
       mgRank: s[b + 14],
+      vote: s[b + 15],
     });
   }
   return {
@@ -96,6 +101,7 @@ export function decodeState(s: number[]): GameView {
     lastSpace: s[12],
     lastDelta: s[13],
     mgWinner: s[14],
+    voteItem: s[15],
     players,
   };
 }
@@ -121,6 +127,10 @@ interface WasmExports {
   actSubmit(p: number, raw: number): number;
   actStrip(p: number, item: number): number;
   actForfeit(p: number): number;
+  actVote(p: number, item: number): number;
+  actVoteClose(): number;
+  canRemove(p: number, item: number): number;
+  canRestore(p: number, item: number): number;
 }
 
 export interface ActionResult {
@@ -134,6 +144,7 @@ export const ERRORS: Record<number, string> = {
   [-2]: "It isn't your move.",
   [-3]: "Invalid choice.",
   [-4]: "Not enough coins, or nothing to do.",
+  [-5]: "That item can't come off (or go back on) yet - clothes have an order.",
 };
 
 /** Thin stateless wrapper: load a state array, run one Wasm action, read it back. */
@@ -199,6 +210,22 @@ export class Engine {
   }
   strip(s: number[], p: number, item: number) {
     return this.run(s, (ex) => ex.actStrip(p, item));
+  }
+  vote(s: number[], p: number, item: number) {
+    return this.run(s, (ex) => ex.actVote(p, item));
+  }
+  voteClose(s: number[]) {
+    return this.run(s, (ex) => ex.actVoteClose());
+  }
+  /** Can player p take this item off right now (respecting clothing order)? */
+  canRemove(s: number[], p: number, item: number): boolean {
+    this.view().set(s);
+    return this.ex.canRemove(p, item) !== 0;
+  }
+  /** Can player p put this item back on right now? */
+  canRestore(s: number[], p: number, item: number): boolean {
+    this.view().set(s);
+    return this.ex.canRestore(p, item) !== 0;
   }
   forfeit(s: number[], p: number) {
     return this.run(s, (ex) => ex.actForfeit(p));
